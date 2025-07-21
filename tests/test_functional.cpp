@@ -283,9 +283,6 @@ TEST_F(FunctionalTest, WeakPtrLifetimeManagement) {
     ant::signal<int> sig;
     std::vector<int> results;
     
-    auto obj1 = std::make_shared<TestObject>();
-    auto obj2 = std::make_shared<TestObject>();
-    
     class TestHandler {
     public:
         void handle(int value) { last_value = value; }

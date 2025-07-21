@@ -10,3 +10,9 @@ add_library(ant INTERFACE)
 target_include_directories(ant INTERFACE src)
 
 target_compile_features(ant INTERFACE cxx_std_23)
+
+# Enable testing support only when explicitly requested
+if(BUILD_TESTING)
+    include(CTest)
+    add_subdirectory(tests)
+endif()

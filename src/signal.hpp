@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <concepts>
 #include <optional>
+#include <deque>
 
 /**
  * @brief Convenience macro for creating named signals
@@ -30,7 +31,7 @@
  * 
  * Example:
  * @code
- * SIGNAL(dataChanged, int, std::string); // Creates ant::signal<int, std::string> dataChanged{"dataChanged"};
+ * SIGNAL(dataChanged, int, std::string); // Creates ant::signal<int, std::string> dataChanged;
  * @endcode
  */
 #define SIGNAL(name, ...) ant::signal<__VA_ARGS__> name
@@ -174,7 +175,7 @@ public:
                 cleanup_expired();
                 size_t id = next_id++;
 
-                slots.emplace_back(std::move(slot), std::nullopt, id);
+                slots.emplace_back(std::make_shared<SlotWrapper>(std::move(slot), std::nullopt, id));
                 return connection([this, id](){
                                 this->disconnect_by_id(id);
                                 });
@@ -201,7 +202,7 @@ public:
                         }
                 };
 
-                slots.emplace_back(std::move(slot), std::weak_ptr<void>(object), id);
+                slots.emplace_back(std::make_shared<SlotWrapper>(std::move(slot), std::weak_ptr<void>(object), id));
                 return connection([this, id]{
                                 disconnect_by_id(id);
                                 });
@@ -221,11 +222,22 @@ public:
 
                 auto slots_copy = slots;
 
-                for(const auto& wrapper : slots_copy) {
-                        try {
-                                wrapper.slot(args...);
-                        } catch (...) {}
-                }
+		for(const auto& wrapper : slots_copy)
+		{
+			slots_queue.push_back(wrapper);
+		}
+
+		if (!emitting) {
+			emitting = true;
+			while(!slots_queue.empty()){
+				auto wrapper = slots_queue.front();
+				slots_queue.pop_front();
+				try {
+				wrapper->slot(args...);
+				} catch (...) {}
+			}
+			emitting = false;
+		}
         }
 
         /**
@@ -247,7 +259,8 @@ public:
          * @brief Get the number of currently connected slots
          * @return Number of active connections
          */
-        size_t slot_count() const {
+        size_t slot_count() {
+        	cleanup_expired();
                 return slots.size();
         }
 
@@ -270,9 +283,10 @@ private:
                 }
         };
         
-        std::string name; ///< Optional signal name for debugging
-        std::vector<SlotWrapper> slots; ///< Container for all connected slots
+        std::vector<std::shared_ptr<SlotWrapper>> slots; ///< Container for all connected slots
         size_t next_id = 0; ///< Counter for generating unique slot IDs
+	static inline std::deque<std::shared_ptr<SlotWrapper>> slots_queue = {};
+	static inline bool emitting = false;
 
         /**
          * @brief Remove slots whose associated objects have been destroyed
@@ -283,8 +297,8 @@ private:
         void cleanup_expired() {
                 std::erase_if(
                                 slots, 
-                                        [this](const SlotWrapper& wrapper) {
-                                                return wrapper.weak_ref_opt.has_value() && wrapper.weak_ref_opt.value().expired();
+                                        [this](const std::shared_ptr<SlotWrapper>& wrapper) {
+                                                return wrapper->weak_ref_opt.has_value() && wrapper->weak_ref_opt.value().expired();
                                         });
         }
 
@@ -294,8 +308,8 @@ private:
          */
         void disconnect_by_id(size_t id) {
                 std::erase_if(slots, 
-                                [id](const SlotWrapper& wrapper) {
-                                        return wrapper.id == id;
+                                [id](const std::shared_ptr<SlotWrapper>& wrapper) {
+                                        return wrapper->id == id;
                                 }
                            );
         }
